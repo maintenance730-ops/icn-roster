@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1F3864">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="ICN Roster">
+<title>ICN Line Roster</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+  html,body{margin:0;height:100%;background:#1F3864;
+    font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Apple SD Gothic Neo","Noto Sans KR",Arial,sans-serif}
+  #app{position:fixed;inset:0;width:100%;height:100%;border:0;background:#F1F5F9;display:none}
+  #splash{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#fff;gap:14px}
+  #splash img{width:96px;height:96px;border-radius:22px}
+  #splash .s{font-size:13px;color:#B8C4DA}
+  .spin{width:24px;height:24px;border:3px solid rgba(255,255,255,.25);border-top-color:#fff;border-radius:50%;animation:sp .8s linear infinite}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  #setup{display:none;min-height:100%;box-sizing:border-box;padding:40px 20px;color:#0F172A;background:#F1F5F9}
+  #setup .card{max-width:480px;margin:0 auto;background:#fff;border-radius:16px;padding:22px;border:1px solid #E2E8F0}
+  #setup h1{font-size:20px;margin:10px 0 4px}
+  #setup p{color:#475569;margin:6px 0 14px;font-size:14px}
+  #setup .ko{font-size:13px;color:#64748B}
+  #setup input{width:100%;box-sizing:border-box;height:46px;border:1px solid #CBD5E1;border-radius:10px;padding:0 12px;font-size:14px}
+  #setup button{width:100%;height:46px;border:0;border-radius:10px;font-size:15px;font-weight:700;margin-top:10px;cursor:pointer}
+  #save{background:#1F3864;color:#fff}
+  #share{background:#EEF2F8;color:#1F3864}
+  #err{color:#B91C1C;font-size:13px;min-height:18px;margin-top:8px}
+  #setup img{width:56px;height:56px;border-radius:14px}
+</style>
+</head>
+<body>
+<div id="splash"><img src="icon-192.png" alt=""><div class="spin"></div><div class="s" id="splashMsg">Loading roster…</div></div>
+<iframe id="app" title="ICN Line Roster" allow="clipboard-write; fullscreen"></iframe>
+
+<div id="setup">
+  <div class="card">
+    <img src="icon-192.png" alt="">
+    <h1>ICN Line Roster — setup</h1>
+    <p>Paste the roster web app link once. It is saved on this phone only.<br>
+      <span class="ko">웹앱 주소(…/exec)를 한 번만 붙여넣으면 이 폰에 저장돼.</span></p>
+    <input id="url" type="url" inputmode="url" autocomplete="off" placeholder="https://script.google.com/macros/s/…/exec">
+    <div id="err"></div>
+    <button id="save">Save &amp; open</button>
+    <button id="share">Copy team link</button>
+    <p class="ko">팀원에게는 "Copy team link"로 복사한 링크를 보내주면, 열자마자 바로 설정돼.</p>
+  </div>
+</div>
+
+<script>
+(function () {
+  var KEY = 'icn_roster_url';
+  var OK = /^https:\/\/script\.google\.com\/(a\/macros\/[^\/]+|macros)\/s\/[\w-]+\/(exec|dev)(\?.*)?$/;
+  function get() { try { return localStorage.getItem(KEY) || ''; } catch (e) { return ''; } }
+  function set(v) { try { v ? localStorage.setItem(KEY, v) : localStorage.removeItem(KEY); } catch (e) {} }
+  function $(id) { return document.getElementById(id); }
+  function base() { return location.origin + location.pathname; }
+
+  // link params: ?u=<web app url> saves it, ?reset=1 clears it
+  var q = new URLSearchParams(location.search);
+  if (q.has('reset')) set('');
+  if (q.get('u') && OK.test(q.get('u').trim())) set(q.get('u').trim());
+  if (q.has('u') || q.has('reset')) history.replaceState(null, '', base());
+
+  function open(url) {
+    $('setup').style.display = 'none';
+    $('splash').style.display = 'flex';
+    var f = $('app');
+    var timer = setTimeout(function () {
+      $('splashMsg').textContent = navigator.onLine ? 'Still loading… (check the web app access setting)' : 'No internet connection';
+    }, 12000);
+    f.onload = function () { clearTimeout(timer); $('splash').style.display = 'none'; f.style.display = 'block'; };
+    f.src = url;
+  }
+
+  function setup(msg) {
+    $('splash').style.display = 'none';
+    $('setup').style.display = 'block';
+    $('url').value = get();
+    $('err').textContent = msg || '';
+  }
+
+  function read() {
+    var v = $('url').value.trim();
+    if (!OK.test(v)) { $('err').textContent = 'That does not look like a web app link (…/macros/s/…/exec).'; return null; }
+    return v;
+  }
+  $('save').onclick = function () { var v = read(); if (v) { set(v); open(v); } };
+  $('share').onclick = function () {
+    var v = read(); if (!v) return;
+    var link = base() + '?u=' + encodeURIComponent(v);
+    (navigator.clipboard ? navigator.clipboard.writeText(link) : Promise.reject())
+      .then(function () { $('err').style.color = '#15803D'; $('err').textContent = 'Team link copied ✓'; })
+      .catch(function () { prompt('Copy this link:', link); });
+  };
+
+  var saved = get();
+  if (saved && OK.test(saved)) open(saved); else setup();
+
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function () { navigator.serviceWorker.register('sw.js').catch(function () {}); });
+  }
+})();
+</script>
+</body>
+</html>
