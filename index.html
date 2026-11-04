@@ -32,11 +32,26 @@
   #share{background:#EEF2F8;color:#1F3864}
   #err{color:#B91C1C;font-size:13px;min-height:18px;margin-top:8px}
   #setup img{width:56px;height:56px;border-radius:14px}
+  #ask{position:fixed;inset:0;z-index:9;background:rgba(15,23,42,.55);display:none;align-items:flex-end;justify-content:center}
+  #ask .box{width:100%;max-width:480px;background:#fff;border-radius:18px 18px 0 0;padding:20px 20px calc(20px + env(safe-area-inset-bottom));color:#0F172A}
+  #ask b{font-size:17px}
+  #ask p{color:#475569;font-size:14px;margin:8px 0 14px}
+  #ask .ko{font-size:13px;color:#64748B}
+  #ask button{width:100%;height:46px;border:0;border-radius:11px;font-size:15px;font-weight:700;margin-top:8px;cursor:pointer}
+  #askYes{background:#1F3864;color:#fff}
+  #askNo{background:#EEF2F8;color:#1F3864}
 </style>
 </head>
 <body>
 <div id="splash"><img src="icon-192.png" alt=""><div class="spin"></div><div class="s" id="splashMsg">Loading roster…</div></div>
 <iframe id="app" title="ICN Line Roster" allow="clipboard-write; fullscreen"></iframe>
+
+<div id="ask"><div class="box">
+  <b>🔔 Allow notifications</b>
+  <p>For your wake-up call and flight alerts. Tap Allow on the next pop-up.<br>
+    <span class="ko">모닝콜·비행기 알림을 받으려면 다음 창에서 '허용'을 눌러줘.</span></p>
+  <button id="askYes">Allow</button><button id="askNo">Not now</button>
+</div></div>
 
 <div id="setup">
   <div class="card">
@@ -105,6 +120,70 @@
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', function () { navigator.serviceWorker.register('sw.js').catch(function () {}); });
   }
+
+  // ---------- push notifications (asked by the roster page inside the frame) ----------
+  // The roster page sends {icn:'push', cmd:'ping'|'token', fcm:{config, vapid}}; we answer with permission / FCM token.
+  var FB = 'https://www.gstatic.com/firebasejs/10.12.2/';
+  var TOKEN_KEY = 'icn_push_token';
+  var fbP = null;
+  function loadJs(src) {
+    return new Promise(function (ok, no) {
+      var s = document.createElement('script'); s.src = src; s.onload = ok;
+      s.onerror = function () { no(new Error('could not load ' + src)); }; document.head.appendChild(s);
+    });
+  }
+  function messaging(cfg) {
+    if (!fbP) {
+      fbP = loadJs(FB + 'firebase-app-compat.js').then(function () { return loadJs(FB + 'firebase-messaging-compat.js'); })
+        .then(function () { if (!firebase.apps.length) firebase.initializeApp(cfg); return firebase.messaging(); });
+      fbP.catch(function () { fbP = null; });
+    }
+    return fbP;
+  }
+  function standalone() { return navigator.standalone === true || !!(window.matchMedia && matchMedia('(display-mode: standalone)').matches); }
+  function isIOS() { return /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1); }
+  function supported() { return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window; }
+  function getToken(fcm) {
+    return navigator.serviceWorker.register('sw.js')
+      .then(function () { return navigator.serviceWorker.ready; })
+      .then(function (reg) {
+        return messaging(fcm.config).then(function (m) { return m.getToken({ vapidKey: fcm.vapid, serviceWorkerRegistration: reg }); });
+      });
+  }
+  function askPermission(yes, no) {
+    $('ask').style.display = 'flex';
+    $('askYes').onclick = function () {
+      $('ask').style.display = 'none';
+      Notification.requestPermission().then(function (p) { p === 'granted' ? yes() : no(p); }, function () { no('denied'); });
+    };
+    $('askNo').onclick = function () { $('ask').style.display = 'none'; no('later'); };
+  }
+  window.addEventListener('message', function (ev) {
+    var d = ev.data;
+    if (!d || d.icn !== 'push' || !ev.source) return;
+    var host = '';
+    try { host = new URL(ev.origin).hostname; } catch (e) {}
+    if (!/\.googleusercontent\.com$/.test(host)) return;          // only the roster page (Apps Script) may ask
+    function reply(o) { o.icn = 'push'; o.id = d.id; try { ev.source.postMessage(o, ev.origin); } catch (e) {} }
+    var sup = supported();
+    if (d.cmd === 'ping') {
+      return reply({ shell: true, supported: sup, ios: isIOS(), standalone: standalone(), perm: sup ? Notification.permission : 'unsupported' });
+    }
+    if (d.cmd !== 'token') return;
+    if (!sup) return reply({ error: 'unsupported' });
+    if (!d.fcm || !d.fcm.config || !d.fcm.vapid) return reply({ error: 'token', msg: 'no Firebase config' });
+    function go() {
+      getToken(d.fcm).then(function (t) {
+        var prev = '';
+        try { prev = localStorage.getItem(TOKEN_KEY) || ''; localStorage.setItem(TOKEN_KEY, t); } catch (e) {}
+        reply({ token: t, prev: prev && prev !== t ? prev : '' });
+      }).catch(function (e) { reply({ error: 'token', msg: String(e && e.message || e) }); });
+    }
+    if (Notification.permission === 'granted') return go();
+    if (Notification.permission === 'denied') return reply({ error: 'denied' });
+    if (!d.ask) return reply({ error: 'ask' });
+    askPermission(go, function (p) { reply({ error: p === 'later' ? 'later' : 'denied' }); });
+  });
 })();
 </script>
 </body>
