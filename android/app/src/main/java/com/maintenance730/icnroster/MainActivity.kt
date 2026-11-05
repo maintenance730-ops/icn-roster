@@ -134,10 +134,42 @@ class MainActivity : AppCompatActivity() {
                 try { startActivity(Intent(Intent.ACTION_VIEW, req.url)) } catch (e: Exception) { }
                 return true
             }
+
+            override fun onPageFinished(view: WebView, url: String) {
+                if (Uri.parse(url).host == "script.google.com") view.evaluateJavascript(HIDE_BANNER, null)
+            }
         }
         Bridge.attach(this, w)
         setContentView(w)
         w.loadUrl(url)
+    }
+
+    companion object {
+        /**
+         * Google shows a "created by a Google Apps Script user" bar above every Apps Script web app.
+         * In the app we hide it: keep only the frame that holds the roster and stretch it to the full screen.
+         */
+        private const val HIDE_BANNER = """
+(function () {
+  function fix() {
+    var f = document.getElementById('sandboxFrame'), all = document.querySelectorAll('iframe');
+    if (!f) for (var i = 0; i < all.length; i++) if (!f || all[i].offsetHeight > f.offsetHeight) f = all[i];
+    if (!f || !document.body) return false;
+    var box = f;
+    while (box.parentElement && box.parentElement !== document.body) box = box.parentElement;
+    Array.prototype.forEach.call(document.body.children, function (c) {
+      if (c !== box && c.tagName !== 'SCRIPT' && c.tagName !== 'STYLE') c.style.setProperty('display', 'none', 'important');
+    });
+    box.style.cssText += ';position:fixed!important;top:0!important;left:0!important;right:0!important;bottom:0!important;width:100%!important;height:100%!important;margin:0!important;';
+    f.style.cssText += ';width:100%!important;height:100%!important;border:0!important;';
+    document.documentElement.style.overflow = 'hidden';
+    document.body.style.cssText += ';margin:0!important;padding:0!important;overflow:hidden!important;';
+    return true;
+  }
+  var n = 0, t = setInterval(function () { fix(); if (++n > 20) clearInterval(t); }, 250);
+  fix();
+})();
+"""
     }
 
     // ---------- notification permission (Android 13+) ----------
