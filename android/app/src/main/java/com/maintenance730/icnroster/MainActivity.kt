@@ -23,6 +23,8 @@ import android.widget.TextView
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
 
 /**
  * The roster web app (Apps Script) in a WebView. First start: paste the web app link (or the team link).
@@ -140,6 +142,12 @@ class MainActivity : AppCompatActivity() {
             }
         }
         Bridge.attach(this, w)
+        // hide Google's notice bar: it lives in Apps Script's own frames (script.google.com / *.googleusercontent.com),
+        // so the script is injected into those frames at document start
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+            try { WebViewCompat.addDocumentStartJavaScript(w, HIDE_BANNER, setOf("https://script.google.com", "https://*.googleusercontent.com")) }
+            catch (e: Exception) { }
+        }
         setContentView(w)
         w.loadUrl(url)
     }
@@ -151,23 +159,25 @@ class MainActivity : AppCompatActivity() {
          */
         private const val HIDE_BANNER = """
 (function () {
+  if (window.__icnHide) return; window.__icnHide = 1;
   function fix() {
-    var f = document.getElementById('sandboxFrame'), all = document.querySelectorAll('iframe');
+    if (!document.body) return;
+    var all = document.querySelectorAll('iframe'), f = document.getElementById('userHtmlFrame') || document.getElementById('sandboxFrame');
     if (!f) for (var i = 0; i < all.length; i++) if (!f || all[i].offsetHeight > f.offsetHeight) f = all[i];
-    if (!f || !document.body) return false;
-    var box = f;
-    while (box.parentElement && box.parentElement !== document.body) box = box.parentElement;
-    Array.prototype.forEach.call(document.body.children, function (c) {
-      if (c !== box && c.tagName !== 'SCRIPT' && c.tagName !== 'STYLE') c.style.setProperty('display', 'none', 'important');
-    });
-    box.style.cssText += ';position:fixed!important;top:0!important;left:0!important;right:0!important;bottom:0!important;width:100%!important;height:100%!important;margin:0!important;';
-    f.style.cssText += ';width:100%!important;height:100%!important;border:0!important;';
+    if (!f) return;
+    // hide everything next to the frame (at every level up to <body>) and pin the frame to the whole screen
+    for (var n = f; n && n !== document.body && n.parentElement; n = n.parentElement) {
+      Array.prototype.forEach.call(n.parentElement.children, function (c) {
+        if (c !== n && c.tagName !== 'SCRIPT' && c.tagName !== 'STYLE') c.style.setProperty('display', 'none', 'important');
+      });
+    }
+    f.style.cssText += ';position:fixed!important;top:0!important;left:0!important;width:100%!important;height:100%!important;border:0!important;margin:0!important;z-index:2147483647!important;';
     document.documentElement.style.overflow = 'hidden';
     document.body.style.cssText += ';margin:0!important;padding:0!important;overflow:hidden!important;';
-    return true;
   }
-  var n = 0, t = setInterval(function () { fix(); if (++n > 20) clearInterval(t); }, 250);
-  fix();
+  var n = 0, t = setInterval(function () { fix(); if (++n > 40) clearInterval(t); }, 250);
+  document.addEventListener('DOMContentLoaded', fix);
+  window.addEventListener('load', fix);
 })();
 """
     }
